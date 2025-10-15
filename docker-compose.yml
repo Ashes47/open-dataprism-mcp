@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  dataprism-mcp:
+    image: dataprism-mcp:latest
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=n8n-analyser_traefik_proxy"
+      - "traefik.http.routers.dataprism-mcp.rule=Host(`mcp.dataprism.dev`)"
+      - "traefik.http.routers.dataprism-mcp.entrypoints=websecure"
+      - "traefik.http.routers.dataprism-mcp.tls=true"
+      - "traefik.http.routers.dataprism-mcp.tls.certresolver=letsencrypt"
+      - "traefik.http.services.dataprism-mcp.loadbalancer.server.port=8010"
+    networks:
+      - traefik_proxy
+
+networks:
+  traefik_proxy:
+    external: true
+    name: n8n-analyser_traefik_proxy
