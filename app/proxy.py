@@ -17,9 +17,8 @@ def _merge_headers(h: httpx.Headers) -> dict:
     out = {k: v for k, v in h.items() if k.lower() not in HOP_BY_HOP}
     sid = h.get("mcp-session-id") or h.get("Mcp-Session-Id") or h.get("MCP-SESSION-ID")
     if sid:
-        # set both; HTTP/2 will render lowercase on the wire anyway
+        # Emit a single canonical, lowercase header
         out["mcp-session-id"] = sid
-        out["Mcp-Session-Id"] = sid
     return out
 
 
@@ -28,6 +27,14 @@ async def proxy_streamable_http(req: Request, tail: str = "") -> Response:
         f"{settings.UPSTREAM_MCP_URL}/{tail}" if tail else settings.UPSTREAM_MCP_URL
     )
     fwd_headers = {k: v for k, v in req.headers.items() if k.lower() not in HOP_BY_HOP}
+    # Normalize inbound session header to lowercase for the upstream
+    sid_in = (
+        req.headers.get("mcp-session-id")
+        or req.headers.get("Mcp-Session-Id")
+        or req.headers.get("MCP-SESSION-ID")
+    )
+    if sid_in:
+        fwd_headers["mcp-session-id"] = sid_in
     fwd_headers["X-API-KEY"] = settings.UPSTREAM_MCP_KEY
 
     method = req.method.upper()
