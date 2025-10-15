@@ -1,6 +1,6 @@
 import httpx
 from fastapi import Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from app.config import settings
 
 HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding"}
@@ -40,11 +40,11 @@ async def proxy_streamable_http(req: Request, tail: str = "") -> Response:
         else:
             body = await req.body()
             upstream_res = await client.request(method, upstream, headers=fwd_headers, content=body)
-            content_type = upstream_res.headers.get("content-type", "")
-            if "application/json" in content_type:
-                return JSONResponse(upstream_res.json(), status_code=upstream_res.status_code)
+            headers = {k: v for k, v in upstream_res.headers.items() if k.lower() not in HOP_BY_HOP}
+            # Return raw bytes so we preserve headers like Mcp-Session-Id.
             return Response(
                 content=upstream_res.content,
                 status_code=upstream_res.status_code,
-                media_type=content_type or None,
+                media_type=upstream_res.headers.get("content-type"),
+                headers=headers,
             )
