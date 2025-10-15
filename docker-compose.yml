@@ -13,7 +13,7 @@ services:
       - "traefik.http.routers.dataprism-mcp.rule=Host(`mcp.dataprism.dev`)"
       - "traefik.http.routers.dataprism-mcp.entrypoints=websecure"
       - "traefik.http.routers.dataprism-mcp.tls=true"
-      - "traefik.http.routers.dataprism-mcp.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dataprism-mcp.tls.certresolver=myresolver"
       - "traefik.http.services.dataprism-mcp.loadbalancer.server.port=8010"
     networks:
       - traefik_proxy
