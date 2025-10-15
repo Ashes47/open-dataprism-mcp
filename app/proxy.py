@@ -3,30 +3,30 @@ from fastapi import Request, Response
 from fastapi.responses import StreamingResponse
 from app.config import settings
 
-HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding", "keep-alive", "upgrade"}
+HOP_BY_HOP = {
+    "host",
+    "content-length",
+    "connection",
+    "transfer-encoding",
+    "keep-alive",
+    "upgrade",
+}
 
-def _merge_headers(upstream_headers: httpx.Headers) -> dict:
-    # Pass everything except hop-by-hop; also explicitly surface the session header
-    out = {k: v for k, v in upstream_headers.items() if k.lower() not in HOP_BY_HOP}
-    # Normalize any casing the upstream might use
-    sid = (
-        upstream_headers.get("mcp-session-id")
-        or upstream_headers.get("Mcp-Session-Id")
-        or upstream_headers.get("MCP-SESSION-ID")
-    )
+
+def _merge_headers(h: httpx.Headers) -> dict:
+    out = {k: v for k, v in h.items() if k.lower() not in HOP_BY_HOP}
+    sid = h.get("mcp-session-id") or h.get("Mcp-Session-Id") or h.get("MCP-SESSION-ID")
     if sid:
-        out["Mcp-Session-Id"] = sid  # canonicalize casing
+        # set both; HTTP/2 will render lowercase on the wire anyway
+        out["mcp-session-id"] = sid
+        out["Mcp-Session-Id"] = sid
     return out
 
-async def proxy_streamable_http(req: Request, tail: str = "") -> Response:
-    """
-    Minimal Streamable-HTTP proxy (no auth).
-    - Preserves POST/GET
-    - Passes through SSE (text/event-stream)
-    - Injects X-API-KEY to upstream
-    """
-    upstream = f"{settings.UPSTREAM_MCP_URL}/{tail}" if tail else settings.UPSTREAM_MCP_URL
 
+async def proxy_streamable_http(req: Request, tail: str = "") -> Response:
+    upstream = (
+        f"{settings.UPSTREAM_MCP_URL}/{tail}" if tail else settings.UPSTREAM_MCP_URL
+    )
     fwd_headers = {k: v for k, v in req.headers.items() if k.lower() not in HOP_BY_HOP}
     fwd_headers["X-API-KEY"] = settings.UPSTREAM_MCP_KEY
 
@@ -36,23 +36,23 @@ async def proxy_streamable_http(req: Request, tail: str = "") -> Response:
             upstream_res = await client.stream(
                 method, upstream, headers=fwd_headers, params=dict(req.query_params)
             )
-            status_code = upstream_res.status_code
             headers = _merge_headers(upstream_res.headers)
 
             async def aiter():
                 async for chunk in upstream_res.aiter_raw():
                     yield chunk
 
-            media_type = upstream_res.headers.get("content-type", "")
             return StreamingResponse(
                 aiter(),
-                status_code=status_code,
-                media_type=media_type or None,
+                status_code=upstream_res.status_code,
+                media_type=upstream_res.headers.get("content-type") or None,
                 headers=headers,
             )
         else:
             body = await req.body()
-            upstream_res = await client.request(method, upstream, headers=fwd_headers, content=body)
+            upstream_res = await client.request(
+                method, upstream, headers=fwd_headers, content=body
+            )
             headers = _merge_headers(upstream_res.headers)
             return Response(
                 content=upstream_res.content,
