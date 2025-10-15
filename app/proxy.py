@@ -3,7 +3,20 @@ from fastapi import Request, Response
 from fastapi.responses import StreamingResponse
 from app.config import settings
 
-HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding"}
+HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding", "keep-alive", "upgrade"}
+
+def _merge_headers(upstream_headers: httpx.Headers) -> dict:
+    # Pass everything except hop-by-hop; also explicitly surface the session header
+    out = {k: v for k, v in upstream_headers.items() if k.lower() not in HOP_BY_HOP}
+    # Normalize any casing the upstream might use
+    sid = (
+        upstream_headers.get("mcp-session-id")
+        or upstream_headers.get("Mcp-Session-Id")
+        or upstream_headers.get("MCP-SESSION-ID")
+    )
+    if sid:
+        out["Mcp-Session-Id"] = sid  # canonicalize casing
+    return out
 
 async def proxy_streamable_http(req: Request, tail: str = "") -> Response:
     """
@@ -24,24 +37,23 @@ async def proxy_streamable_http(req: Request, tail: str = "") -> Response:
                 method, upstream, headers=fwd_headers, params=dict(req.query_params)
             )
             status_code = upstream_res.status_code
-            headers = dict(upstream_res.headers)
+            headers = _merge_headers(upstream_res.headers)
 
             async def aiter():
                 async for chunk in upstream_res.aiter_raw():
                     yield chunk
 
-            media_type = headers.get("content-type", "")
+            media_type = upstream_res.headers.get("content-type", "")
             return StreamingResponse(
                 aiter(),
                 status_code=status_code,
                 media_type=media_type or None,
-                headers={k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP},
+                headers=headers,
             )
         else:
             body = await req.body()
             upstream_res = await client.request(method, upstream, headers=fwd_headers, content=body)
-            headers = {k: v for k, v in upstream_res.headers.items() if k.lower() not in HOP_BY_HOP}
-            # Return raw bytes so we preserve headers like Mcp-Session-Id.
+            headers = _merge_headers(upstream_res.headers)
             return Response(
                 content=upstream_res.content,
                 status_code=upstream_res.status_code,
